@@ -28,6 +28,18 @@ def refine_data(oridata_gen=get_data):
         con.append((float(line[0]), 0 if float(line[1]) >=99 else 1))
     return np.array(con)
 
+def get_minibatches_idx(n, minibatch_size, shuffle=False):
+    idx_list = np.arange(n, dtype="int32") 
+    if shuffle:np.random.shuffle(idx_list)
+    minibatches = []
+    minibatch_start = 0
+    for i in range(n // minibatch_size):
+        minibatches.append(idx_list[minibatch_start: minibatch_start + minibatch_size])
+        minibatch_start += minibatch_size
+    if (minibatch_start != n):
+        minibatches.append(idx_list[minibatch_start:])
+    return zip(range(len(minibatches)), minibatches)
+
 def zipp(params, tparams):
     for kk, vv in params.iteritems():
         tparams[kk].set_value(vv)
@@ -111,8 +123,6 @@ def dropout_layer(state_before, use_noise, trng):
     return proj
 
 def build_model(tparams, model_options):
-    #tmp
-    f_pred_prob, f_pred, cost = 0, 0, 0
     
     trng = RandomStreams(SEED)
     use_noise = theano.theano.shared(numpy_floatX(0.))
@@ -129,29 +139,29 @@ def build_model(tparams, model_options):
     #x is at a same length status.
 
     proj = lstm(tparams, emb, model_options, prefix='lstm', mask=mask)
-    #proj = (proj * mask[:, :, None]).sum(axis=0)
-    #proj = proj / mask.sum(axis=0)[:, None]
+    proj = (proj * mask[:, :, None]).sum(axis=0)
+    proj = proj / mask.sum(axis=0)[:, None]
     
-    #if model_options['use_dropout']:
-    #    proj = dropout_layer(proj, use_noise, trng)
+    if model_options['use_dropout']:
+        proj = dropout_layer(proj, use_noise, trng)
 
-    #pred = tensor.nnet.softmax(tensor.dot(proj, tparams['U']) + tparams['b'])
-    #f_pred_prob = theano.function([x, mask], pred, name='f_pred_prob')
-    #f_pred = theano.function([x, mask], pred.argmax(axis=1), name='f_pred')
+    pred = tensor.nnet.softmax(tensor.dot(proj, tparams['U']) + tparams['b'])
+    f_pred_prob = theano.function([x, mask], pred, name='f_pred_prob')
+    f_pred = theano.function([x, mask], pred.argmax(axis=1), name='f_pred')
 
-    #off = 1e-8
-    #if pred.dtype == 'float16':
-    #    off = 1e-6
+    off = 1e-8
+    if pred.dtype == 'float16':
+        off = 1e-6
     
-    #cost = -tensor.log(pred[tensor.arange(n_samples), y] + off).mean()
+    cost = -tensor.log(pred[tensor.arange(n_samples), y] + off).mean()
 
-    #tmp
-    f_pred_prob, f_pred, cost = 0, 0, 0
+    print tparams
 
     return use_noise, x, mask, y, f_pred_prob, f_pred, cost
 
     
-def main_loop(samples=refine_data, word_embeding_dimension=3, max_word_id=1, use_dropout=True):
+def main_loop(samples=refine_data, word_embeding_dimension=3, max_word_id=1, use_dropout=True, decay_c=0., valid_batch_size=1, batch_size=1,\
+     lrate=0.0001, validFreq=370, saveFreq=1110, dispFreq=10, max_epochs=500, patience=10):
     
     #getting settings
     model_options = locals().copy()  
@@ -159,6 +169,8 @@ def main_loop(samples=refine_data, word_embeding_dimension=3, max_word_id=1, use
     #loading data
     print 'loading data...'
     train_set = samples()
+    valid_set = samples()
+    test_set = samples()
     print 'trainingset shape: %srows, %sclos' % train_set.shape
     ydim = np.max(train_set[:,1]) + 1
     model_options['ydim'] = ydim
@@ -170,6 +182,40 @@ def main_loop(samples=refine_data, word_embeding_dimension=3, max_word_id=1, use
 
     #building model
     (use_noise, x, mask, y, f_pred_prob, f_pred, cost) = build_model(tparams, model_options)
+
+    #decay setting
+    if decay_c > 0.:
+        decay_c = theano.shared(numpy_floatX(decay_c), name='decay_c')
+        weight_decay = 0.
+        weight_decay += (tparams['U'] ** 2).sum()
+        weight_decay *= decay_c
+        cost += weight_decay
+
+    #cost/grad setting, optimization
+    f_cost = theano.function([x, mask, y], cost, name='f_cost')
+    grads = tensor.grad(cost, wrt=tparams.values())
+    f_grad = theano.function([x, mask, y], grads, name='f_grad')
+    lr = tensor.scalar(name='lr')
+    f_grad_shared, f_update = optimizer.adadelta(lr, tparams, grads, x, mask, y, cost)
+    print 'Optimization'
+
+    #preparing data
+    kf_valid = get_minibatches_idx(len(valid_set[:,0]), valid_batch_size)
+    kf_test = get_minibatches_idx(len(test_set[:, 0]), valid_batch_size)
+    print "%d train examples" % len(train_set[:,0])
+    print "%d valid examples" % len(valid_set[:,0])
+    print "%d test examples" % len(test_set[:,0])
+    history_errs = []
+    best_p = None
+    bad_count = 0
+
+    if validFreq == -1:
+        validFreq = len(train[0]) / batch_size
+    if saveFreq == -1:
+        saveFreq = len(train[0]) / batch_size
+    uidx = 0
+    estop = False
+    start_time = time.time()
 
 class TestMainLoop(unittest.TestCase):
     
