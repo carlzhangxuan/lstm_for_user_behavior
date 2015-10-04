@@ -40,6 +40,23 @@ def get_minibatches_idx(n, minibatch_size, shuffle=False):
         minibatches.append(idx_list[minibatch_start:])
     return zip(range(len(minibatches)), minibatches)
 
+def preparer(data_set, max_sample_len=None):
+    if max_sample_len != None:
+        assert type(max_sample_len) is int
+        data_set = np.array(filter(lambda (x, y):(len(x)) <= max_sample_len, data_set))
+    samples_len = len(data_set)
+    #max_sample_len = np.array([len(s) for s in data_set[:, 0]]).max()
+    max_sample_len = 1
+    x = np.zeros((max_sample_len, samples_len)).astype('int64')
+    x_mask = np.zeros((max_sample_len, samples_len)).astype(theano.config.floatX)
+    for idx, s in enumerate(data_set[:, 0]):
+        x[:1, idx] = s
+        #x[:len(s), idx] = s
+        #x_mask[:len(s), idx] = 1
+        x_mask[:1, idx] = 1
+  
+    return x, x_mask, data_set[:,1]
+
 def zipp(params, tparams):
     for kk, vv in params.iteritems():
         tparams[kk].set_value(vv)
@@ -160,8 +177,8 @@ def build_model(tparams, model_options):
     return use_noise, x, mask, y, f_pred_prob, f_pred, cost
 
     
-def main_loop(samples=refine_data, word_embeding_dimension=3, max_word_id=1, use_dropout=True, decay_c=0., valid_batch_size=1, batch_size=1,\
-     lrate=0.0001, validFreq=370, saveFreq=1110, dispFreq=10, max_epochs=5, patience=10):
+def main_loop(samples=refine_data, word_embeding_dimension=3, max_word_id=1, use_dropout=True, decay_c=0., valid_batch_size=64, batch_size=16,\
+     lrate=0.0001, validFreq=370, saveFreq=1110, dispFreq=10, max_epochs=1, patience=10):
     
     #getting settings
     model_options = locals().copy()  
@@ -229,7 +246,13 @@ def main_loop(samples=refine_data, word_embeding_dimension=3, max_word_id=1, use
 
                 y = [train_set[:,1][t] for t in train_index]
                 x = [train_set[:,0][t] for t in train_index]
-                print len(y)
+                x, mask, y =  preparer(np.array(zip(x, y)))
+                y = list(y)
+
+                print x, mask, y
+                n_samples += x.shape[1]
+                cost = f_grad_shared(x, mask, y)
+                f_update(lrate)
     
     except KeyboardInterrupt:
         print 'Loop interrupted!'
@@ -242,7 +265,20 @@ class TestMainLoop(unittest.TestCase):
     def test_main_loop(self):
         print 'testing main loop...'
         main_loop()
+    def test_prepare(self):
+        print 'testing preparer...'
+        #data_set = np.array([(0,1),(2,1)])
+        #print data_set
+        #print preparer(data_set)
 
 if __name__ == '__main__':
     print 'training lstm with unit test...'
     unittest.main()
+
+
+
+
+
+
+
+
