@@ -161,7 +161,7 @@ def build_model(tparams, model_options):
 
     
 def main_loop(samples=refine_data, word_embeding_dimension=3, max_word_id=1, use_dropout=True, decay_c=0., valid_batch_size=1, batch_size=1,\
-     lrate=0.0001, validFreq=370, saveFreq=1110, dispFreq=10, max_epochs=500, patience=10):
+     lrate=0.0001, validFreq=370, saveFreq=1110, dispFreq=10, max_epochs=5, patience=10):
     
     #getting settings
     model_options = locals().copy()  
@@ -210,12 +210,32 @@ def main_loop(samples=refine_data, word_embeding_dimension=3, max_word_id=1, use
     bad_count = 0
 
     if validFreq == -1:
-        validFreq = len(train[0]) / batch_size
+        validFreq = len(train_set[:,0]) / batch_size
     if saveFreq == -1:
-        saveFreq = len(train[0]) / batch_size
+        saveFreq = len(train[:,0]) / batch_size
     uidx = 0
     estop = False
     start_time = time.time()
+
+    #loop
+    try:
+        for eidx in xrange(max_epochs):
+            n_samples=0
+            kf = get_minibatches_idx(len(train_set[:,0]), batch_size, shuffle=True)
+
+            for _, train_index in kf:
+                uidx += 1
+                use_noise.set_value(1.)
+
+                y = [train_set[:,1][t] for t in train_index]
+                x = [train_set[:,0][t] for t in train_index]
+                print len(y)
+    
+    except KeyboardInterrupt:
+        print 'Loop interrupted!'
+
+
+    end_time = time.time()
 
 class TestMainLoop(unittest.TestCase):
     
