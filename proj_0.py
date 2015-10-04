@@ -111,6 +111,9 @@ def dropout_layer(state_before, use_noise, trng):
     return proj
 
 def build_model(tparams, model_options):
+    #tmp
+    f_pred_prob, f_pred, cost = 0, 0, 0
+    
     trng = RandomStreams(SEED)
     use_noise = theano.theano.shared(numpy_floatX(0.))
     x = tensor.matrix('x', dtype='int64')
@@ -119,7 +122,13 @@ def build_model(tparams, model_options):
     n_timesteps = x.shape[0]
     n_samples = x.shape[1] 
     emb = tparams['Wemb'][x.flatten()].reshape([n_timesteps, n_samples, model_options['word_embeding_dimension']])
-    #proj = lstm(tparams, emb, model_options, prefix='lstm', mask=mask)
+    #tparams['Wemb'] is word embedding rows are words, cols are dimensions
+    #x is a bunch of samples.
+    #x.flatten() is indexing the word embedding.
+    #reshapes trasforming the mateix back
+    #x is at a same length status.
+
+    proj = lstm(tparams, emb, model_options, prefix='lstm', mask=mask)
     #proj = (proj * mask[:, :, None]).sum(axis=0)
     #proj = proj / mask.sum(axis=0)[:, None]
     
