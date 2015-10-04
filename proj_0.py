@@ -1,7 +1,6 @@
 #coding:utf8
 
 import sys
-sys.path.append('/home/disk3/zhangxuan/DL_Pipeline')
 import time
 import unittest
 import cPickle as pkl
@@ -143,7 +142,7 @@ def build_model(tparams, model_options):
     return use_noise, x, mask, y, f_pred_prob, f_pred, cost
 
     
-def main_loop(samples=refine_data, word_embeding_dimension=128, max_word_id=1, use_dropout=True):
+def main_loop(samples=refine_data, word_embeding_dimension=3, max_word_id=1, use_dropout=True):
     
     #getting settings
     model_options = locals().copy()  
