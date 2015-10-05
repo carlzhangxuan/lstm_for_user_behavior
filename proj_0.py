@@ -257,20 +257,63 @@ def main_loop(samples=refine_data, word_embeding_dimension=1, max_word_id=1, use
 
                 print x, mask, y
                 n_samples += x.shape[1]
-                cost = f_grad_shared(x, mask, y)
+                #cost = f_grad_shared(x, mask, y)
                 #f_update(lrate)
     
-    except KeyboardInterrupt:
-        print 'Loop interrupted!'
+                if np.isnan(cost) or np.isinf(cost):
+                    print 'NaN detected'
+                    return 1., 1., 1.
+
+                if np.mod(uidx, dispFreq) == 0:
+                    print 'Epoch ', eidx, 'Update ', uidx, 'Cost ', cost
+
+                if np.mod(uidx, validFreq) == 0:
+                    use_noise.set_value(0.)
+                    train_err = pred_error(f_pred, preparer, train_set, kf)
+                    valid_err = pred_error(f_pred, preparer, valid_set, kf_valid)
+                    test_err = pred_error(f_pred, preparer, test_set, kf_test)
+                    history_errs.append([valid_err, test_err])
+
+                    if (uidx == 0 or valid_err <= np.array(history_errs)[:,0].min()):
+                        best_p = unzip(tparams)
+                        bad_counter = 0
+                    print ('Train ', train_err, 'Valid ', valid_err, 'Test ', test_err)
+                    if (len(history_errs) > patience and valid_err >= np.array(history_errs)[:-patience, 0].min()):
+                        bad_counter += 1
+                        if bad_counter > patience:
+                            print 'Early Stop!'
+                            estop = True
+                            break
+            
+            print 'Seen %d samples' % n_samples
+                                    
+    except Exception,e:
+        print traceback.format_exc()
 
 
     end_time = time.time()
+    if best_p is not None:
+        zipp(best_p, tparams)
+    else:
+        best_p = unzip(tparams)
 
+    use_noise.set_value(0.)
+    kf_train_sorted = get_minibatches_idx(len(train_set[:,0]), batch_size)
+    train_err = pred_error(f_pred, preparer, train_set, kf_train_sorted)
+    valid_err = pred_error(f_pred, preparer, valid_set, kf_valid)
+    test_err = pred_error(f_pred, preparer, test_set, kf_test)
+
+    print 'Train ', train_err, 'Valid ', valid_err, 'Test ', test_err
+    print 'The code run for %d epochs, with %f sec/epochs' % ((eidx + 1), (end_time - start_time) / (1. * (eidx + 1)))
+    print >> sys.stderr, ('Training took %.1fs' % (end_time - start_time))
+
+    return train_err, valid_err, test_err
+    
 class TestMainLoop(unittest.TestCase):
     
     def test_main_loop(self):
         print 'testing main loop...'
-        #main_loop()
+        main_loop()
     def test_prepare(self):
         print 'testing preparer...'
         #data_set = np.array([(0,1),(2,1)])
