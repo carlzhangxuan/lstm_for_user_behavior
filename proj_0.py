@@ -45,15 +45,15 @@ def preparer(data_set, max_sample_len=None):
         assert type(max_sample_len) is int
         data_set = np.array(filter(lambda (x, y):(len(x)) <= max_sample_len, data_set))
     samples_len = len(data_set)
-    #max_sample_len = np.array([len(s) for s in data_set[:, 0]]).max()
-    max_sample_len = 1
+    max_sample_len = np.array([len(s) for s in data_set[:, 0]]).max()
+    #max_sample_len = 1
     x = np.zeros((max_sample_len, samples_len)).astype('int64')
     x_mask = np.zeros((max_sample_len, samples_len)).astype(theano.config.floatX)
     for idx, s in enumerate(data_set[:, 0]):
-        x[:1, idx] = s
-        #x[:len(s), idx] = s
-        #x_mask[:len(s), idx] = 1
-        x_mask[:1, idx] = 1
+    #    x[:1, idx] = s
+        x[:len(s), idx] = s
+        x_mask[:len(s), idx] = 1
+        #x_mask[:1, idx] = 1
   
     return x, x_mask, data_set[:,1]
 
@@ -77,11 +77,14 @@ def ortho_weight(ndim):
 
 def init_paras(model_options):
     params = OrderedDict()
+    #randn = np.random.rand(model_options['max_word_id'], model_options['word_embeding_dimension'])
     randn = np.random.rand(model_options['max_word_id'], model_options['word_embeding_dimension'])
     params['Wemb'] = (0.01 * randn).astype(config.floatX)
+    print 'pre_lstm layer 1 W', params['Wemb']
     params = init_lstm_paras(model_options, params, prefix='lstm')
     params['U'] = 0.01 * np.random.randn(model_options['word_embeding_dimension'], model_options['ydim']).astype(config.floatX)
     params['b'] = np.zeros((model_options['ydim'],)).astype(config.floatX)
+    print 'after lstm init ', params
     return params
 
 def init_lstm_paras(options, params, prefix='lstm'):
@@ -101,8 +104,10 @@ def init_tparams(params):
     return tparams
 
 def lstm(tparams, state_below, model_options, prefix='lstm', mask=None):
+
     nsteps = state_below.shape[0]
     if state_below.ndim == 3:
+    #if state_below.ndim == 2:
         n_samples = state_below.shape[1]
     else:
         n_samples = 1
@@ -149,6 +154,7 @@ def build_model(tparams, model_options):
     n_timesteps = x.shape[0]
     n_samples = x.shape[1] 
     emb = tparams['Wemb'][x.flatten()].reshape([n_timesteps, n_samples, model_options['word_embeding_dimension']])
+    #emb = tparams['Wemb'].repeat(n_samples).reshape([n_timesteps, n_samples])
     #tparams['Wemb'] is word embedding rows are words, cols are dimensions
     #x is a bunch of samples.
     #x.flatten() is indexing the word embedding.
@@ -177,7 +183,7 @@ def build_model(tparams, model_options):
     return use_noise, x, mask, y, f_pred_prob, f_pred, cost
 
     
-def main_loop(samples=refine_data, word_embeding_dimension=3, max_word_id=1, use_dropout=True, decay_c=0., valid_batch_size=64, batch_size=16,\
+def main_loop(samples=refine_data, word_embeding_dimension=1, max_word_id=1, use_dropout=True, decay_c=0., valid_batch_size=64, batch_size=16,\
      lrate=0.0001, validFreq=370, saveFreq=1110, dispFreq=10, max_epochs=1, patience=10):
     
     #getting settings
@@ -252,7 +258,7 @@ def main_loop(samples=refine_data, word_embeding_dimension=3, max_word_id=1, use
                 print x, mask, y
                 n_samples += x.shape[1]
                 cost = f_grad_shared(x, mask, y)
-                f_update(lrate)
+                #f_update(lrate)
     
     except KeyboardInterrupt:
         print 'Loop interrupted!'
@@ -264,12 +270,65 @@ class TestMainLoop(unittest.TestCase):
     
     def test_main_loop(self):
         print 'testing main loop...'
-        main_loop()
+        #main_loop()
     def test_prepare(self):
         print 'testing preparer...'
         #data_set = np.array([(0,1),(2,1)])
         #print data_set
         #print preparer(data_set)
+    def test_lstm(self):
+        print 'testing lstm cell...'
+        print 'testing inner function 1 _slice'
+        #'lstm_U' is 4 times length
+        def _slice(_x, n, dim):
+            if _x.ndim == 3:
+                return _x[:, n * dim:(n + 1) * dim]
+            return _x[:, n * dim:(n+1)*dim]
+        x = np.arange(27).reshape(3,3,3).repeat(4, axis=1)
+        x0 = _slice(x, 0, 3)
+        assert x0.shape == (3, 3, 3)
+        print 'testing innrt function 2 _step'
+        def _step(m_, x_, h_, c_):
+            preact = tensor.dot(h_, tp['lstm_U'])
+            #preact = np.dot(h_, tp['lstm_U'])
+            preact += x_
+        
+            i = tensor.nnet.sigmoid(_slice(preact, 0, 3))
+            f = tensor.nnet.sigmoid(_slice(preact, 1, 3))
+            o = tensor.nnet.sigmoid(_slice(preact, 2, 3))
+            c = tensor.tanh(_slice(preact, 3, 3)) 
+        
+            c = f * c_ + i * c
+            c = m_[:, None] * c + (1. - m_)[:, None] * c_
+            h = o * tensor.tanh(c)
+            h = m_[:, None] * h + (1. - m_)[:, None] * h_
+            
+            return h, c
+        
+        tp = {}             
+        tp['lstm_U'] = np.concatenate([ortho_weight(3), ortho_weight(3), ortho_weight(3), ortho_weight(3)], axis=1)
+        tp['lstm_W'] = np.concatenate([ortho_weight(3), ortho_weight(3), ortho_weight(3), ortho_weight(3)], axis=1)
+        tp['lstm_b'] = np.zeros((4 * 3,))
+        randn = np.random.rand(5, 3)
+        tp['Wemb'] = theano.shared((0.01 * randn).astype(config.floatX))
+        h_ = np.zeros([3, 3])
+        c_ = np.zeros([3, 3])
+
+        x = tensor.matrix('x', dtype='int64')
+        mask = tensor.matrix('mask', dtype=config.floatX)
+        y = tensor.vector('y', dtype='int64')
+        n_timesteps = x.shape[0]
+        n_samples = x.shape[1]
+        emb = tp['Wemb'][x.flatten()].reshape([n_timesteps, n_samples, 3])
+        emb = (tensor.dot(emb, tp['lstm_W']) + tp['lstm_b']) 
+        rval, updates = theano.scan(_step, sequences=[mask, emb], outputs_info=[tensor.alloc(numpy_floatX(0.), 3, 3), tensor.alloc(numpy_floatX(0.), 3, 3)], name=\
+            'test_layers', n_steps=3)
+        test_f = theano.function([mask, x], rval[0])
+
+        data_set = np.array([([1,1,1],0),([2,2,2],0),([3,3,3],1)])
+        x_r, mask_r, y_r = preparer(data_set)
+        print test_f(mask_r, x_r)
+
 
 if __name__ == '__main__':
     print 'training lstm with unit test...'
